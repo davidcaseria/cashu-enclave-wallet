@@ -1,0 +1,109 @@
+services:
+  wallet-postgres:
+    image: postgres:18.0-bookworm
+    environment:
+      POSTGRES_USER: cashu
+      POSTGRES_PASSWORD: cashu
+      POSTGRES_DB: wallet_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - wallet_postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cashu -d wallet_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  keycloak-postgres:
+    image: postgres:18.0-bookworm
+    environment:
+      POSTGRES_USER: cashu
+      POSTGRES_PASSWORD: cashu
+      POSTGRES_DB: keycloak_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - keycloak_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cashu -d keycloak_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/keycloak_db
+      KC_DB_USERNAME: cashu
+      KC_DB_PASSWORD: cashu
+      KC_HTTP_ENABLED: "true"
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+      - "9000:9000"
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /realms/master HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q 'HTTP/1.1 200' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  keycloak-init:
+    image: quay.io/keycloak/keycloak:26.0
+    entrypoint: /bin/bash
+    command: /tmp/init-realm.sh
+    volumes:
+      - ./keycloak/init-realm.sh:/tmp/init-realm.sh:ro
+      - ./keycloak/cashu-realm.json:/tmp/cashu-realm.json:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
+  wallet:
+    build:
+      context: .
+      dockerfile: wallet/Dockerfile
+      args:
+        BUILD_FEATURES: "--no-default-features --features local-dev"
+    environment:
+      DATABASE_URL: postgresql://cashu:cashu@wallet-postgres:5432/wallet_db
+      JWKS_URL: http://keycloak:8080/realms/cashu-enclave/protocol/openid-connect/certs
+      RUST_LOG: info
+      SOCKET_PATH: /tmp/enclave.sock
+    volumes:
+      - enclave-socket:/tmp
+    depends_on:
+      wallet-postgres:
+        condition: service_healthy
+      keycloak-init:
+        condition: service_completed_successfully
+
+  proxy:
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+    environment:
+      LISTEN_ADDR: 0.0.0.0:50051
+      ENCLAVE_CID: "16"
+      RUST_LOG: info
+      MODE: local
+      SOCKET_PATH: /tmp/enclave.sock
+    ports:
+      - "50051:50051"
+    volumes:
+      - enclave-socket:/tmp
+    depends_on:
+      - wallet
+
+volumes:
+  wallet_postgres_data:
+  keycloak_postgres_data:
+  enclave-socket:

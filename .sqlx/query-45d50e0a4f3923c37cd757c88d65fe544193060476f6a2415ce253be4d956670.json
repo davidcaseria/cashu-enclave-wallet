@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_wallets (user_id_encrypted, wallet_id, created_at)\n             VALUES ($1, $2, NOW())\n             ON CONFLICT (user_id_encrypted, wallet_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "45d50e0a4f3923c37cd757c88d65fe544193060476f6a2415ce253be4d956670"
+}

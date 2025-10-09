@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE proofs SET proof_encrypted = $3, state = $4 WHERE wallet_id = $1 AND y_hash = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea",
+        "Bytea",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "657eb7f007b783db405b5726306d500bb856c356462a63b88180a6ba52659f81"
+}

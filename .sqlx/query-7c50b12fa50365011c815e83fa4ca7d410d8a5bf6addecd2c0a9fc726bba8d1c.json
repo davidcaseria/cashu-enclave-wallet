@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM seeds WHERE wallet_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7c50b12fa50365011c815e83fa4ca7d410d8a5bf6addecd2c0a9fc726bba8d1c"
+}

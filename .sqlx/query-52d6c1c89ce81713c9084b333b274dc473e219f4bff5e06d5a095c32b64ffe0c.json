@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT quote_encrypted FROM mint_quotes WHERE wallet_id = $1 AND quote_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "quote_encrypted",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "52d6c1c89ce81713c9084b333b274dc473e219f4bff5e06d5a095c32b64ffe0c"
+}

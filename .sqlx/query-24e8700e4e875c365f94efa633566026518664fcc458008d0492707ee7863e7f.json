@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM transactions WHERE wallet_id = $1 AND tx_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "24e8700e4e875c365f94efa633566026518664fcc458008d0492707ee7863e7f"
+}

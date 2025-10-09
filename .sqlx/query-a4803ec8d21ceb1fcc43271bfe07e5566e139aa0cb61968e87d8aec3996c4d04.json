@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO keysets (wallet_id, mint_url, keyset_id, keyset_info_encrypted, created_at)\n                 VALUES ($1, $2, $3, $4, NOW())\n                 ON CONFLICT (wallet_id, mint_url, keyset_id) DO UPDATE\n                 SET keyset_info_encrypted = EXCLUDED.keyset_info_encrypted",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text",
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a4803ec8d21ceb1fcc43271bfe07e5566e139aa0cb61968e87d8aec3996c4d04"
+}

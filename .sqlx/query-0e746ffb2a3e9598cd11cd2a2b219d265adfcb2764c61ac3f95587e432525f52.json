@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM mint_quotes WHERE wallet_id = $1 AND quote_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0e746ffb2a3e9598cd11cd2a2b219d265adfcb2764c61ac3f95587e432525f52"
+}

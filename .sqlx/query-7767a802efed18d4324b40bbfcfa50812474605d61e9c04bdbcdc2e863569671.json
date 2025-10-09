@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT keyset_info_encrypted FROM keysets WHERE wallet_id = $1 AND mint_url = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "keyset_info_encrypted",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7767a802efed18d4324b40bbfcfa50812474605d61e9c04bdbcdc2e863569671"
+}

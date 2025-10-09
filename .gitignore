@@ -1,0 +1,28 @@
+# Rust
+/target
+**/target
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Enclave artifacts
+*.eif
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite

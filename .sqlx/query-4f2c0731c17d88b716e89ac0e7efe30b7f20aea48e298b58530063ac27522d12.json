@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM proofs WHERE wallet_id = $1 AND y_hash = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f2c0731c17d88b716e89ac0e7efe30b7f20aea48e298b58530063ac27522d12"
+}

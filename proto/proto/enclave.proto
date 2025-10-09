@@ -1,0 +1,237 @@
+syntax = "proto3";
+
+package enclave;
+
+// Enclave service for wallet operations
+//
+// AUTHENTICATION:
+// All authenticated RPCs (InitWallet, WalletOperation) require the following gRPC metadata:
+// - "x-session-id": Hex-encoded session ID (after first request)
+// - "x-encrypted-jwt": Base64-encoded JWT encrypted with session key (AES-256-GCM)
+//
+// ENCRYPTION:
+// Session-based end-to-end encryption using AES-256-GCM:
+// 1. Client generates AES-256 session key
+// 2. Client encrypts session key with RSA public key from attestation
+// 3. Client sends encrypted session key in InitWallet request
+// 4. Enclave returns session_id for subsequent requests
+// 5. All future requests use session key for encryption
+service EnclaveService {
+  // Get attestation document from the enclave
+  // Returns RSA public key in attestation for session key encryption
+  rpc GetAttestation(AttestationRequest) returns (AttestationResponse);
+
+  // Initialize a new wallet
+  // The enclave generates the seed using NSM entropy (or OsRng in local mode)
+  // Requires metadata: x-encrypted-jwt (encrypted with session key)
+  rpc InitWallet(InitWalletRequest) returns (InitWalletResponse);
+
+  // Execute a wallet operation
+  // Requires metadata: x-session-id, x-encrypted-jwt
+  // User management (AddUser, RemoveUser, ListUsers) is done via this RPC
+  rpc WalletOperation(WalletOperationRequest) returns (WalletOperationResponse);
+
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// Request for attestation document
+message AttestationRequest {
+  // Optional nonce for attestation
+  optional bytes nonce = 1;
+}
+
+// Response containing attestation document
+message AttestationResponse {
+  // Base64-encoded attestation document from AWS Nitro NSM
+  string attestation_document = 1;
+
+  // User data included in attestation (e.g., JWKS URL)
+  string user_data = 2;
+}
+
+// Request to initialize a wallet
+// The enclave generates the seed internally - client does not provide it
+message InitWalletRequest {
+  // Base64-encoded session key encrypted with RSA public key from attestation
+  // This session key will be used for all subsequent encrypted communications
+  string encrypted_session_key = 1;
+}
+
+// Response from wallet initialization
+message InitWalletResponse {
+  // Hex-encoded wallet ID derived from generated seed
+  string wallet_id = 1;
+
+  // Base64-encoded seed encrypted with session key (AES-256-GCM)
+  // Client must decrypt and securely store this seed
+  string encrypted_seed = 2;
+
+  // Hex-encoded session ID for subsequent requests
+  // Client must include this in x-session-id metadata
+  string session_id = 3;
+}
+
+// Request for wallet operation
+// Requires metadata: x-session-id (hex), x-encrypted-jwt (base64, encrypted with session key)
+message WalletOperationRequest {
+  // Hex-encoded wallet ID
+  string wallet_id = 1;
+
+  // Base64-encoded encrypted operation payload (encrypted with session key)
+  string encrypted_request = 2;
+}
+
+// Response from wallet operation
+// Response data is encrypted with session key (base64-encoded in data field)
+message WalletOperationResponse {
+  oneof result {
+    OperationSuccess success = 1;
+    OperationError error = 2;
+  }
+}
+
+// Successful operation response
+message OperationSuccess {
+  // Base64-encoded encrypted response data (encrypted with session key)
+  // Decrypts to JSON-encoded operation result
+  string data = 1;
+}
+
+// Error response
+message OperationError {
+  // Error message
+  string message = 1;
+
+  // Error code for programmatic handling
+  string code = 2;
+}
+
+// Health check request
+message HealthCheckRequest {}
+
+// Health check response
+message HealthCheckResponse {
+  enum Status {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+
+  Status status = 1;
+}
+
+// ============================================================================
+// Wallet Operation Payload Messages
+// ============================================================================
+// These messages define the actual wallet operations that are encrypted
+// and sent in WalletOperationRequest.encrypted_request
+
+// Wrapper message containing all possible wallet operations
+// The encrypted_request field in WalletOperationRequest contains
+// the encrypted serialized bytes of this message
+message WalletOperationPayload {
+  oneof operation {
+    GetBalanceRequest get_balance = 1;
+    SendRequest send = 2;
+    ReceiveRequest receive = 3;
+    MintQuoteRequest mint_quote = 4;
+    MintRequest mint = 5;
+    MeltQuoteRequest melt_quote = 6;
+    MeltRequest melt = 7;
+    AddMintRequest add_mint = 8;
+    ListMintsRequest list_mints = 9;
+    GetTransactionsRequest get_transactions = 10;
+    AddUserRequest add_user = 11;
+    RemoveUserRequest remove_user = 12;
+    ListUsersRequest list_users = 13;
+  }
+}
+
+// Get wallet balance
+message GetBalanceRequest {
+  // Optional mint URL to get balance for specific mint
+  optional string mint_url = 1;
+}
+
+// Send tokens
+message SendRequest {
+  // Amount to send in sats
+  uint64 amount = 1;
+
+  // Optional mint URL to send from
+  optional string mint_url = 2;
+}
+
+// Receive tokens
+message ReceiveRequest {
+  // Cashu token string to receive
+  string token = 1;
+}
+
+// Create mint quote
+message MintQuoteRequest {
+  // Amount to mint in sats
+  uint64 amount = 1;
+
+  // Mint URL
+  string mint_url = 2;
+}
+
+// Mint tokens from quote
+message MintRequest {
+  // Quote ID from MintQuoteRequest
+  string quote_id = 1;
+}
+
+// Create melt quote
+message MeltQuoteRequest {
+  // Lightning invoice or payment request (bolt11)
+  string bolt11 = 1;
+
+  // Mint URL
+  string mint_url = 2;
+}
+
+// Melt tokens
+message MeltRequest {
+  // Quote ID from MeltQuoteRequest
+  string quote_id = 1;
+
+  // Mint URL
+  string mint_url = 2;
+}
+
+// Add mint to wallet
+message AddMintRequest {
+  // Mint URL to add
+  string mint_url = 1;
+}
+
+// List all mints in wallet
+message ListMintsRequest {
+  // No parameters needed
+}
+
+// Get transaction history
+message GetTransactionsRequest {
+  // Optional mint URL to filter transactions
+  optional string mint_url = 1;
+}
+
+// Add user to wallet
+message AddUserRequest {
+  // User ID to add
+  string user_id = 1;
+}
+
+// Remove user from wallet
+message RemoveUserRequest {
+  // User ID to remove
+  string user_id = 1;
+}
+
+// List users with access to wallet
+message ListUsersRequest {
+  // No parameters needed
+}

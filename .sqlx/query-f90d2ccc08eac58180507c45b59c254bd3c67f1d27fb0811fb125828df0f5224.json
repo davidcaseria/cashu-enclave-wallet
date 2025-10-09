@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM melt_quotes WHERE wallet_id = $1 AND quote_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f90d2ccc08eac58180507c45b59c254bd3c67f1d27fb0811fb125828df0f5224"
+}

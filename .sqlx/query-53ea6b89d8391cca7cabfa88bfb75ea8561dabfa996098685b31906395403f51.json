@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO keyset_counters (wallet_id, keyset_id, counter)\n             VALUES ($1, $2, $3)\n             ON CONFLICT (wallet_id, keyset_id) DO UPDATE\n             SET counter = keyset_counters.counter + $3\n             RETURNING counter",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "counter",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "53ea6b89d8391cca7cabfa88bfb75ea8561dabfa996098685b31906395403f51"
+}

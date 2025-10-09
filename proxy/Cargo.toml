@@ -1,0 +1,33 @@
+[package]
+name = "proxy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "proxy"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Proto definitions
+proto = { path = "../proto" }
+
+# gRPC
+tonic = "0.12"
+tonic-reflection = "0.12"
+tonic-health = "0.12"
+
+# Vsock
+tokio-vsock = "0.7"
+
+# Utilities
+base64 = "0.22"

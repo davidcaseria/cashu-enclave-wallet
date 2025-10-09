@@ -1,0 +1,45 @@
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "cashu-enclave-wallet"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+
+# Proto definitions
+proto = { path = "../proto" }
+
+# gRPC client
+tonic = "0.12"
+prost = "0.13"
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+colored = "3.0"
+
+# Cryptography (for client-side encryption)
+rsa = { version = "0.9", features = ["sha2"] }
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.22"
+hex = "0.4"
+aes-gcm = "0.10"
+
+# JWT
+jsonwebtoken = "9.3"
+
+# BIP39 for seed generation (optional, for CLI convenience)
+bip39 = "2.2"
+
+# AWS NSM API for attestation parsing
+aws-nitro-enclaves-nsm-api = "0.4"

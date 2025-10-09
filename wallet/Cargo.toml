@@ -1,0 +1,61 @@
+[package]
+name = "wallet"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "wallet"
+path = "src/main.rs"
+
+[features]
+default = ["nsm"]
+local-dev = []
+nsm = ["dep:tokio-vsock"]
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Local crates
+proto = { path = "../proto" }
+
+# Protobuf
+prost = "0.13"
+
+# Cashu Development Kit
+cdk = "0.13.1"
+
+# AWS Nitro Enclaves
+aws-nitro-enclaves-nsm-api = "0.4"
+tokio-vsock = { version = "0.7", optional = true }
+
+# Database
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "macros", "chrono"] }
+chrono = "0.4"
+
+# Cryptography
+aes-gcm = "0.10"
+sha2 = "0.10"
+hkdf = "0.12"
+rsa = { version = "0.9", features = ["sha2"] }
+zeroize = { version = "1.8", features = ["derive"] }
+rand = "0.8"
+
+# JWT
+jsonwebtoken = "9.3"
+
+# HTTP client for JWKS fetching
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+
+# Utilities
+hex = "0.4"
+base64 = "0.22"
+async-trait = "0.1"
+serde_bytes = "0.11"

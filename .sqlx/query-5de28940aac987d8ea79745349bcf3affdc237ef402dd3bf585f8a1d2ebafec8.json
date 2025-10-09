@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO seeds (wallet_id, encrypted_seed, kms_key_id, encryption_context, created_at, updated_at)\n             VALUES ($1, $2, $3, $4, NOW(), NOW())\n             ON CONFLICT (wallet_id) DO UPDATE\n             SET encrypted_seed = EXCLUDED.encrypted_seed,\n                 kms_key_id = EXCLUDED.kms_key_id,\n                 encryption_context = EXCLUDED.encryption_context,\n                 updated_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5de28940aac987d8ea79745349bcf3affdc237ef402dd3bf585f8a1d2ebafec8"
+}

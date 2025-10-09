@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT encrypted_seed, kms_key_id, encryption_context, created_at, updated_at\n             FROM seeds WHERE wallet_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "encrypted_seed",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 1,
+        "name": "kms_key_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "encryption_context",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "25948bbfab797a02d576b746b2c7a975f8d4568c5c92685f2ba2a825b6e1380c"
+}

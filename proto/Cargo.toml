@@ -1,0 +1,17 @@
+[package]
+name = "proto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["prost"]
+
+[dependencies]
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+
+[build-dependencies]
+tonic-build = "0.12"

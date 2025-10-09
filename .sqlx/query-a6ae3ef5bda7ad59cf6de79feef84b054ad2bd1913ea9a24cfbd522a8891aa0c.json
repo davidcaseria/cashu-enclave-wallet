@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM user_wallets WHERE user_id_encrypted = $1 AND wallet_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a6ae3ef5bda7ad59cf6de79feef84b054ad2bd1913ea9a24cfbd522a8891aa0c"
+}

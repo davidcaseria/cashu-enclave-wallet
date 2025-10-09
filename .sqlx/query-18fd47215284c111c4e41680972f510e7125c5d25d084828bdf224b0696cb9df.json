@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT mint_info_encrypted FROM wallets WHERE wallet_id = $1 AND mint_url = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mint_info_encrypted",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "18fd47215284c111c4e41680972f510e7125c5d25d084828bdf224b0696cb9df"
+}
