@@ -34,6 +34,9 @@ COPY Cargo.toml Cargo.lock ./
 COPY wallet ./wallet
 COPY proto ./proto
 COPY .sqlx ./.sqlx
+
+# Enable SQLx offline mode to use cached queries
+ENV SQLX_OFFLINE=true
 RUN cargo build --release --bin wallet ${BUILD_FEATURES}
 
 # Runtime image

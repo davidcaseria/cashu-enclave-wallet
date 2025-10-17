@@ -23,13 +23,16 @@ RUN apt-get update && apt-get install -y \
 
 # Copy recipe and build dependencies
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+
+# Accept build arguments for feature flags
+ARG BUILD_FEATURES=""
+RUN cargo chef cook --release --recipe-path recipe.json ${BUILD_FEATURES}
 
 # Copy source and build application
 COPY Cargo.toml Cargo.lock ./
 COPY proxy ./proxy
 COPY proto ./proto
-RUN cargo build --release --bin proxy
+RUN cargo build --release --bin proxy ${BUILD_FEATURES}
 
 # Runtime image
 FROM debian:bookworm-slim

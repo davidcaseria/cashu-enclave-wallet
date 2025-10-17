@@ -3,7 +3,9 @@ mod crypto;
 mod database;
 mod error;
 mod network;
+mod network_proxy;
 mod types;
+mod vsock_http;
 mod wallet_manager;
 
 use attestation::AttestationService;
@@ -17,6 +19,11 @@ use sqlx::postgres::PgPoolOptions;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Install rustls crypto provider before any TLS operations
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(

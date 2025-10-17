@@ -9,6 +9,11 @@ license.workspace = true
 name = "proxy"
 path = "src/main.rs"
 
+[features]
+default = ["vsock"]
+vsock = ["dep:tokio-vsock"]
+local-dev = []
+
 [dependencies]
 # Workspace dependencies
 tokio = { workspace = true }
@@ -27,7 +32,12 @@ tonic-reflection = "0.12"
 tonic-health = "0.12"
 
 # Vsock
-tokio-vsock = "0.7"
+tokio-vsock = { version = "0.7", optional = true }
+
+# HTTP Proxy
+hyper = { version = "1.5", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
+http-body-util = "0.1"
 
 # Utilities
 base64 = "0.22"

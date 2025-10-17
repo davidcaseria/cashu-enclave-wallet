@@ -29,8 +29,9 @@ proto = { path = "../proto" }
 # Protobuf
 prost = "0.13"
 
-# Cashu Development Kit
-cdk = "0.13.1"
+# Cashu Development Kit - using davidcaseria fork for custom MintConnector support
+cdk = { git = "https://github.com/davidcaseria/cdk", branch = "main" }
+cdk-common = { git = "https://github.com/davidcaseria/cdk", branch = "main" }
 
 # AWS Nitro Enclaves
 aws-nitro-enclaves-nsm-api = "0.4"
@@ -54,8 +55,14 @@ jsonwebtoken = "9.3"
 # HTTP client for JWKS fetching
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 
+# TLS for vsock HTTP transport
+tokio-rustls = "0.26"
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
+webpki-roots = "0.26"
+
 # Utilities
 hex = "0.4"
 base64 = "0.22"
 async-trait = "0.1"
 serde_bytes = "0.11"
+url = "2.5"

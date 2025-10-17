@@ -586,6 +586,22 @@ impl WalletDatabase for EncryptedPostgresDatabase {
         Ok(proofs)
     }
 
+    /// Get balance
+    async fn get_balance(
+        &self,
+        mint_url: Option<MintUrl>,
+        unit: Option<CurrencyUnit>,
+        state: Option<Vec<State>>,
+    ) -> std::result::Result<u64, Self::Err> {
+        // Get proofs matching the filters
+        let proofs = self.get_proofs(mint_url, unit, state, None).await?;
+
+        // Sum up the amounts (convert Amount to u64)
+        let balance: u64 = proofs.iter().map(|p| u64::from(p.proof.amount)).sum();
+
+        Ok(balance)
+    }
+
     /// Update proof states
     async fn update_proofs_state(
         &self,

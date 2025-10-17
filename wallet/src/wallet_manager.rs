@@ -2,10 +2,11 @@ use crate::attestation::AttestationService;
 use crate::crypto::kms::KmsService;
 use crate::crypto::seed::SeedManager;
 use crate::crypto::session::{SessionKeyManager, SessionId};
-use crate::database::{EncryptedPostgresDatabase, EncryptedSeedRecord};
+use crate::database::EncryptedPostgresDatabase;
 use crate::error::{EnclaveError, Result};
 use crate::types::{WalletId, WalletOperation};
-use cdk::wallet::multi_mint_wallet::{MultiMintWallet, MultiMintReceiveOptions, MultiMintSendOptions};
+use crate::vsock_http::VsockTransport;
+use cdk::wallet::{MultiMintWallet, MultiMintReceiveOptions, MultiMintSendOptions, multi_mint_wallet::WalletConfig, BaseHttpClient};
 use cdk::nuts::CurrencyUnit;
 use cdk::Amount;
 use cdk::mint_url::MintUrl;
@@ -23,6 +24,7 @@ const SESSION_TIMEOUT: Duration = Duration::from_secs(3600); // 1 hour
 struct UserSession {
     seed_manager: SeedManager,
     wallet: MultiMintWallet,
+    vsock_transport: Arc<VsockTransport>,
     last_activity: Instant,
 }
 
@@ -41,7 +43,32 @@ impl UserSession {
             *seed_manager.db_encryption_key(),
         );
 
-        // Create multi-mint wallet
+        // Create vsock transport for mint communication
+        // This uses the same configuration as the network proxy
+        #[cfg(feature = "nsm")]
+        let vsock_transport = {
+            let parent_cid: u32 = std::env::var("NETWORK_PROXY_PARENT_CID")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(3);
+            let parent_port: u32 = std::env::var("NETWORK_PROXY_PARENT_PORT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(9000);
+            Arc::new(VsockTransport::new(parent_cid, parent_port)?)
+        };
+
+        #[cfg(feature = "local-dev")]
+        let vsock_transport = {
+            let socket_path = std::env::var("NETWORK_PROXY_SOCKET")
+                .unwrap_or_else(|_| "/tmp/network-proxy.sock".to_string());
+            Arc::new(VsockTransport::new(socket_path)?)
+        };
+
+        // Create multi-mint wallet (uses default settings initially)
+        // Note: When mints are added via wallet.add_mint(), they will use default HTTP transport
+        // TODO: Override connector per-mint using wallet.add_mint_with_config() with WalletConfig containing VsockTransport
+        // This requires updating add_mint calls to use add_mint_with_config instead
         let mut seed_array = [0u8; 64];
         seed_array.copy_from_slice(seed_manager.seed());
         let wallet = MultiMintWallet::new(
@@ -50,11 +77,12 @@ impl UserSession {
             unit,
         ).await?;
 
-        tracing::info!("Created new user session for wallet_id: {}", wallet_id);
+        tracing::info!("Created new user session for wallet_id: {} with vsock transport", wallet_id);
 
         Ok(Self {
             seed_manager,
             wallet,
+            vsock_transport,
             last_activity: Instant::now(),
         })
     }
@@ -385,8 +413,9 @@ impl WalletManager {
         session.update_activity();
 
         // Step 7: Execute operation
+        let vsock_transport = session.vsock_transport.clone();
         let result = self
-            .execute_wallet_operation(&mut session.wallet, &db, operation)
+            .execute_wallet_operation(&mut session.wallet, &db, vsock_transport, operation)
             .await?;
 
         // Step 8: Encrypt response with session key
@@ -403,6 +432,7 @@ impl WalletManager {
         &self,
         wallet: &mut MultiMintWallet,
         db: &EncryptedPostgresDatabase,
+        vsock_transport: Arc<VsockTransport>,
         operation: WalletOperation,
     ) -> Result<serde_json::Value> {
         use WalletOperation::*;
@@ -497,10 +527,22 @@ impl WalletManager {
             }
 
             AddMint { mint_url } => {
-                let mint_url = MintUrl::from_str(&mint_url)
+                let mint_url_parsed = MintUrl::from_str(&mint_url)
                     .map_err(|e| EnclaveError::InvalidRequest(e.to_string()))?;
 
-                wallet.add_mint(mint_url, None).await?;
+                // Create HttpClient wrapping VsockTransport for HTTPS-over-vsock
+                // This ensures TLS encryption happens inside the enclave before going over vsock
+                let http_client = BaseHttpClient::with_transport(
+                    mint_url_parsed.clone(),
+                    (*vsock_transport).clone(),
+                    None, // No auth wallet initially
+                );
+
+                // Create WalletConfig with the HTTP client wrapped in Arc
+                let config = WalletConfig::new()
+                    .with_mint_connector(Arc::new(http_client));
+
+                wallet.add_mint_with_config(mint_url_parsed, config).await?;
 
                 Ok(serde_json::json!({ "success": true }))
             }

@@ -1,3 +1,5 @@
+#![cfg(feature = "vsock")]
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

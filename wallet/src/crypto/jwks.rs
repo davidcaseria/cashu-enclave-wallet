@@ -1,10 +1,13 @@
 use crate::error::{EnclaveError, Result};
+use crate::vsock_http::VsockTransport;
+use cdk::wallet::HttpTransport;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
+use url::Url;
 
 const JWKS_REFRESH_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
 
@@ -40,7 +43,7 @@ struct CachedJwks {
 pub struct JwksValidator {
     jwks_url: String,
     cache: Arc<RwLock<CachedJwks>>,
-    client: reqwest::Client,
+    transport: Arc<VsockTransport>,
 }
 
 impl JwksValidator {
@@ -48,10 +51,33 @@ impl JwksValidator {
     pub async fn new(jwks_url: String) -> Result<Self> {
         tracing::info!("Initializing JWKS validator with URL: {}", jwks_url);
 
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .map_err(|e| EnclaveError::Jwt(format!("Failed to create HTTP client: {}", e)))?;
+        // Create VsockTransport for HTTPS-over-vsock communication
+        // This uses the same configuration as wallet operations
+        #[cfg(feature = "nsm")]
+        let transport = {
+            let parent_cid: u32 = std::env::var("NETWORK_PROXY_PARENT_CID")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(3);
+            let parent_port: u32 = std::env::var("NETWORK_PROXY_PARENT_PORT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(9000);
+
+            tracing::info!("JWKS validator using vsock transport (CID: {}, port: {})", parent_cid, parent_port);
+            Arc::new(VsockTransport::new(parent_cid, parent_port)
+                .map_err(|e| EnclaveError::Jwt(format!("Failed to create vsock transport: {}", e)))?)
+        };
+
+        #[cfg(feature = "local-dev")]
+        let transport = {
+            let socket_path = std::env::var("NETWORK_PROXY_SOCKET")
+                .unwrap_or_else(|_| "/tmp/network-proxy.sock".to_string());
+
+            tracing::info!("JWKS validator using Unix socket transport: {}", socket_path);
+            Arc::new(VsockTransport::new(socket_path)
+                .map_err(|e| EnclaveError::Jwt(format!("Failed to create vsock transport: {}", e)))?)
+        };
 
         let cache = Arc::new(RwLock::new(CachedJwks {
             keys: HashMap::new(),
@@ -61,7 +87,7 @@ impl JwksValidator {
         let validator = Self {
             jwks_url,
             cache,
-            client,
+            transport,
         };
 
         // Initial fetch
@@ -75,24 +101,17 @@ impl JwksValidator {
     async fn fetch_jwks(&self) -> Result<JwkSet> {
         tracing::info!("Fetching JWKS from {}", self.jwks_url);
 
-        let response = self
-            .client
-            .get(&self.jwks_url)
-            .send()
+        // Parse URL for transport
+        let url = Url::parse(&self.jwks_url)
+            .map_err(|e| EnclaveError::Jwt(format!("Invalid JWKS URL: {}", e)))?;
+
+        // Use VsockTransport to fetch JWKS over HTTPS-over-vsock
+        // TLS encryption happens inside the enclave before going over vsock
+        let jwk_set: JwkSet = self
+            .transport
+            .http_get(url, None)
             .await
             .map_err(|e| EnclaveError::Jwt(format!("Failed to fetch JWKS: {}", e)))?;
-
-        if !response.status().is_success() {
-            return Err(EnclaveError::Jwt(format!(
-                "JWKS fetch failed with status: {}",
-                response.status()
-            )));
-        }
-
-        let jwk_set: JwkSet = response
-            .json()
-            .await
-            .map_err(|e| EnclaveError::Jwt(format!("Failed to parse JWKS: {}", e)))?;
 
         tracing::info!("Fetched {} keys from JWKS", jwk_set.keys.len());
         Ok(jwk_set)

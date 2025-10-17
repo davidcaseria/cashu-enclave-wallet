@@ -5,8 +5,7 @@ services:
       POSTGRES_USER: cashu
       POSTGRES_PASSWORD: cashu
       POSTGRES_DB: wallet_db
-    ports:
-      - "5432:5432"
+    # No external port mapping - accessible via network proxy
     volumes:
       - wallet_postgres_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
@@ -67,31 +66,20 @@ services:
       keycloak:
         condition: service_healthy
 
-  wallet:
-    build:
-      context: .
-      dockerfile: wallet/Dockerfile
-      args:
-        BUILD_FEATURES: "--no-default-features --features local-dev"
-    environment:
-      DATABASE_URL: postgresql://cashu:cashu@wallet-postgres:5432/wallet_db
-      JWKS_URL: http://keycloak:8080/realms/cashu-enclave/protocol/openid-connect/certs
-      RUST_LOG: info
-      SOCKET_PATH: /tmp/enclave.sock
-    volumes:
-      - enclave-socket:/tmp
-    depends_on:
-      wallet-postgres:
-        condition: service_healthy
-      keycloak-init:
-        condition: service_completed_successfully
-
   proxy:
     build:
       context: .
       dockerfile: proxy/Dockerfile
+      args:
+        BUILD_FEATURES: "--no-default-features"
     environment:
       LISTEN_ADDR: 0.0.0.0:50051
+      # Network proxy for HTTPS requests (JWKS, mints) via Unix socket
+      NETWORK_PROXY_SOCKET: /tmp/network-proxy.sock
+      # Database proxy for PostgreSQL - uses standard PostgreSQL Unix socket naming
+      # This allows sqlx to connect via Unix socket to our proxy
+      POSTGRES_PROXY_SOCKET: /tmp/.s.PGSQL.5432
+      POSTGRES_BACKEND_ADDR: wallet-postgres:5432
       ENCLAVE_CID: "16"
       RUST_LOG: info
       MODE: local
@@ -101,7 +89,35 @@ services:
     volumes:
       - enclave-socket:/tmp
     depends_on:
-      - wallet
+      wallet-postgres:
+        condition: service_healthy
+
+  wallet:
+    build:
+      context: .
+      dockerfile: wallet/Dockerfile
+      args:
+        BUILD_FEATURES: "--no-default-features --features local-dev"
+    environment:
+      # Database connection via Unix socket (shared volume with proxy)
+      # Wallet has ZERO network access - connects directly to proxy's Unix socket
+      # Proxy forwards PostgreSQL protocol to actual database backend
+      DATABASE_URL: postgresql://cashu:cashu@localhost/wallet_db?host=/tmp
+      JWKS_URL: http://keycloak:8080/realms/cashu-enclave/protocol/openid-connect/certs
+      # VsockTransport connects directly to parent's network proxy via Unix socket
+      # All HTTPS traffic (JWKS, mints) goes through this socket with TLS inside wallet
+      NETWORK_PROXY_SOCKET: /tmp/network-proxy.sock
+      RUST_LOG: debug
+      SOCKET_PATH: /tmp/enclave.sock
+    volumes:
+      - enclave-socket:/tmp
+    depends_on:
+      keycloak-init:
+        condition: service_completed_successfully
+      proxy:
+        condition: service_started
+      wallet-postgres:
+        condition: service_healthy
 
 volumes:
   wallet_postgres_data:

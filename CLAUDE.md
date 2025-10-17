@@ -98,8 +98,13 @@ cashu-enclave-wallet --wallet-id <WALLET_ID> balance
 # Run migrations (auto-applied via docker-compose volumes)
 psql $DATABASE_URL < migrations/001_initial_schema.sql
 
-# For SQLx offline compile (after schema changes)
+# For SQLx offline compilation (run AFTER any schema changes)
+# This generates cached query metadata in .sqlx/ directory
+# Required for Docker builds without database connectivity
 DATABASE_URL="postgres:///cashu_enclave" cargo sqlx prepare --workspace
+
+# The .sqlx/ directory is committed to git and used during Docker builds
+# with SQLX_OFFLINE=true environment variable
 ```
 
 ## Architecture Overview
@@ -121,6 +126,8 @@ This is a **zero-knowledge Cashu wallet** running in AWS Nitro Enclaves. The par
 - **Cannot decrypt** any wallet data
 - Forwards encrypted payloads via vsock (Nitro) or Unix socket (local)
 - Implements `EnclaveClient` trait with `VsockClient` or `UnixClient`
+- HTTP CONNECT proxy for HTTPS requests (mints, JWKS, KMS)
+- TCP proxy for PostgreSQL database connections (required in Nitro Enclaves)
 - Mode controlled by `MODE` env var: `nitro` or `local`
 
 **3. `proto/` - Protocol Buffers**
@@ -153,6 +160,117 @@ Wallet (Enclave)
   ↓ [8. Return encrypted response]
 ```
 
+### Network Proxy Architecture
+
+**AWS Nitro Enclaves have NO direct network access.** All network traffic must be routed through the parent EC2 instance. To preserve end-to-end encryption and zero-knowledge properties, the proxy implements different strategies for different types of network calls:
+
+#### 1. HTTPS Requests to Mints (HTTP CONNECT Proxy)
+
+**Security Requirement:** Proxy MUST NOT see request/response content, only destination hostname.
+
+**Implementation:**
+- Proxy runs HTTP CONNECT proxy on port 8888 (`proxy/src/http_proxy/`)
+- Enclave configures `HTTP_PROXY` environment variable to `http://proxy:8888`
+- TLS handshake happens **inside the enclave**, not in proxy
+- Proxy sees only: `CONNECT testnut.cashu.space:443`
+- Proxy forwards raw TCP bytes without decryption
+- Request path, body, and response remain encrypted end-to-end
+
+**Network Flow:**
+```
+Wallet (Enclave)
+  ↓ [CONNECT mint.example.com:443]
+Proxy (HTTP CONNECT on port 8888)
+  ↓ [Establish TCP connection]
+Mint Server
+  ↓ [Proxy tunnels encrypted TLS bytes]
+Wallet (Enclave)
+```
+
+**Code Locations:**
+- Proxy implementation: `proxy/src/http_proxy/server.rs`
+- Enclave HTTP client config: `wallet/src/crypto/jwks.rs:56-63`
+- CDK automatically uses `HTTP_PROXY` environment variable
+
+#### 2. PostgreSQL Database Connections (TCP Proxy)
+
+**Security:** Field-level encryption protects sensitive data even as it passes through proxy.
+
+**Implementation:**
+- Proxy runs TCP proxy on port 5432 (`proxy/src/tcp_proxy/`)
+- Enclave connects to `proxy:5432` instead of direct PostgreSQL connection
+- Proxy forwards raw TCP bytes to backend PostgreSQL (`wallet-postgres:5432`)
+- **AWS Nitro Enclaves cannot access VPC resources directly** - ALL traffic must go through parent
+- Database sees only encrypted blobs for sensitive fields
+- Plaintext fields are only for indexing (wallet_id, mint_url, state)
+
+**Network Flow:**
+```
+Wallet (Enclave)
+  ↓ [Connect to proxy:5432]
+Proxy (TCP Proxy on port 5432)
+  ↓ [Forward TCP stream to PostgreSQL]
+PostgreSQL Database (VPC Resource)
+  ↓ [Receives encrypted data from enclave]
+Wallet (Enclave)
+```
+
+**Code Locations:**
+- Proxy implementation: `proxy/src/tcp_proxy/server.rs`
+- Database connection: `wallet/src/main.rs:57-61` (uses `DATABASE_URL` env var)
+- Field-level encryption: `wallet/src/database/encrypted_db.rs`
+
+#### 3. JWKS Fetching (HTTP CONNECT Proxy)
+
+**Security:** Use same HTTP CONNECT proxy to prevent tampering.
+
+**Implementation:**
+- Same as mint requests
+- JWKS URL typically points to Keycloak or other OIDC provider
+- Proxy cannot modify public keys (protected by TLS)
+- Configured via `HTTP_PROXY` environment variable
+
+#### 4. AWS KMS Requests (HTTP CONNECT Proxy)
+
+**Security:** Attestation document must come from enclave, not proxy.
+
+**Implementation:**
+- Same HTTP CONNECT proxy mechanism
+- KMS requests contain Nitro attestation document
+- KMS verifies enclave identity via attestation
+- Proxy cannot see or modify attestation document (TLS encrypted)
+
+**Note:** AWS KMS integration not yet implemented (see `wallet/src/crypto/kms.rs:241-309`)
+
+#### Security Properties Preserved
+
+✅ **Zero-Knowledge:** Proxy never sees plaintext seeds, JWTs, or proofs
+✅ **End-to-End TLS:** All HTTPS connections established inside enclave
+✅ **Mint Privacy:** Proxy only sees destination hostname, not URL paths or request bodies
+✅ **Tampering Protection:** TLS prevents proxy from modifying JWKS or KMS responses
+✅ **Database Security:** Field-level encryption protects sensitive data even as it transits through TCP proxy
+✅ **PostgreSQL Privacy:** Proxy forwards encrypted blobs without decryption capability
+
+#### Environment Variables
+
+**Wallet (Enclave):**
+- `DATABASE_URL` - PostgreSQL connection string pointing to proxy (e.g., `postgresql://cashu:cashu@proxy:5432/wallet_db`)
+  - Enclave connects to proxy instead of direct PostgreSQL connection
+  - Required for all database operations
+- `HTTP_PROXY` - HTTP CONNECT proxy URL (e.g., `http://proxy:8888`)
+  - Used by reqwest for all HTTPS requests (JWKS, Mints, KMS)
+  - If not set, enclave attempts direct connections (will fail in Nitro)
+
+**Proxy:**
+- `HTTP_PROXY_ADDR` - HTTP CONNECT proxy listen address (default: `0.0.0.0:8888`)
+  - Runs alongside gRPC server on port 50051
+  - Implements RFC 2817 HTTP CONNECT method
+- `POSTGRES_PROXY_ADDR` - PostgreSQL TCP proxy listen address (default: `0.0.0.0:5432`)
+  - Forwards raw TCP traffic to backend PostgreSQL
+  - Runs concurrently with gRPC and HTTP proxy servers
+- `POSTGRES_BACKEND_ADDR` - Backend PostgreSQL address (default: `wallet-postgres:5432`)
+  - Target PostgreSQL server for TCP proxy forwarding
+
 ### Critical Security Invariants
 
 **NEVER violate these rules when modifying code:**
@@ -182,6 +300,8 @@ Wallet (Enclave)
 **Proxy**
 - gRPC service: `proxy/src/grpc/service.rs` - Implements `EnclaveService` RPCs
 - Enclave clients: `proxy/src/vsock/client.rs` and `proxy/src/unix/client.rs`
+- HTTP CONNECT proxy: `proxy/src/http_proxy/server.rs` - HTTPS tunneling for mints/JWKS/KMS
+- TCP proxy: `proxy/src/tcp_proxy/server.rs` - PostgreSQL database forwarding
 - Main entry: `proxy/src/main.rs` - Mode selection and server startup
 
 **CLI**
@@ -265,11 +385,16 @@ Modes controlled by Cargo features in `wallet/Cargo.toml`:
 
 **Wallet (Enclave):**
 - `DATABASE_URL` - PostgreSQL connection string
+- `JWKS_URL` - JWKS endpoint URL for JWT validation (required)
+- `HTTP_PROXY` - HTTP CONNECT proxy URL for HTTPS requests (e.g., `http://proxy:8888`)
 - `SOCKET_PATH` - Unix socket path (local mode only)
 - `RUST_LOG` - Logging level (default: info)
 
 **Proxy:**
 - `LISTEN_ADDR` - gRPC listen address (default: 0.0.0.0:50051)
+- `HTTP_PROXY_ADDR` - HTTP CONNECT proxy listen address (default: 0.0.0.0:8888)
+- `POSTGRES_PROXY_ADDR` - PostgreSQL TCP proxy listen address (default: 0.0.0.0:5432)
+- `POSTGRES_BACKEND_ADDR` - Backend PostgreSQL address (default: wallet-postgres:5432)
 - `MODE` - `local` or `nitro` (default: nitro)
 - `ENCLAVE_CID` - Vsock CID for Nitro mode (default: 16)
 - `SOCKET_PATH` - Unix socket path for local mode

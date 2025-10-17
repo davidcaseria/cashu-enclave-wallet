@@ -1,10 +1,14 @@
 use crate::unix::UnixClient;
+
+#[cfg(feature = "vsock")]
 use crate::vsock::VsockClient;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ClientError {
+    #[cfg(feature = "vsock")]
     #[error("Vsock error: {0}")]
     Vsock(#[from] crate::vsock::VsockError),
 
@@ -14,6 +18,7 @@ pub enum ClientError {
 
 /// Enum wrapper for different enclave client types
 pub enum EnclaveClient {
+    #[cfg(feature = "vsock")]
     Vsock(VsockClient),
     Unix(UnixClient),
 }
@@ -29,6 +34,7 @@ impl EnclaveClient {
         R: for<'de> Deserialize<'de> + Send + 'static,
     {
         match self {
+            #[cfg(feature = "vsock")]
             EnclaveClient::Vsock(client) => {
                 // Vsock client is now async with tokio-vsock
                 client.send_request(request).await.map_err(ClientError::Vsock)
