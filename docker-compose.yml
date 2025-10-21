@@ -61,7 +61,6 @@ services:
     command: /tmp/init-realm.sh
     volumes:
       - ./keycloak/init-realm.sh:/tmp/init-realm.sh:ro
-      - ./keycloak/cashu-realm.json:/tmp/cashu-realm.json:ro
     depends_on:
       keycloak:
         condition: service_healthy

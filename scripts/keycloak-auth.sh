@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # Keycloak JWT Generation Script for Cashu Wallet Enclave
-# This script creates/updates users and generates JWT tokens using Keycloak Admin CLI
-# Fully automated - no web browser required
+# This script authenticates users and generates JWT tokens
 
 set -e
 
@@ -23,6 +22,7 @@ NC='\033[0m' # No Color
 JWT_ONLY=false
 USERNAME=""
 PASSWORD=""
+CREATE_USER=false
 
 print_success() {
     if [ "$JWT_ONLY" = false ]; then
@@ -45,11 +45,11 @@ show_usage() {
 Usage: $0 [OPTIONS]
 
 Generate JWT tokens for Cashu Wallet using Keycloak authentication.
-Creates or updates users automatically.
 
 Options:
   -u, --username USERNAME    Username (prompts if not provided)
   -p, --password PASSWORD    Password (prompts if not provided)
+  -c, --create              Create user if it doesn't exist
   -j, --jwt-only            Output only the JWT token (for scripting)
   -h, --help                Show this help message
 
@@ -66,6 +66,9 @@ Examples:
 
   # With arguments
   $0 --username alice --password secret123
+
+  # Create user if needed
+  $0 --username alice --password secret123 --create
 
   # For scripting (outputs only JWT)
   $0 -u alice -p secret123 --jwt-only
@@ -86,6 +89,10 @@ while [[ $# -gt 0 ]]; do
         -p|--password)
             PASSWORD="$2"
             shift 2
+            ;;
+        -c|--create)
+            CREATE_USER=true
+            shift
             ;;
         -j|--jwt-only)
             JWT_ONLY=true
@@ -108,12 +115,6 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-# Check if docker is available
-if ! command -v docker &> /dev/null; then
-    print_error "docker is required but not installed."
-    exit 1
-fi
-
 # Prompt for username if not provided
 if [ -z "$USERNAME" ]; then
     read -p "Username: " USERNAME
@@ -130,24 +131,15 @@ if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
     exit 1
 fi
 
-# Check if Keycloak container is running
-if ! docker ps --format '{{.Names}}' | grep -q "^${KEYCLOAK_CONTAINER}$"; then
-    print_error "Keycloak container '${KEYCLOAK_CONTAINER}' is not running"
-    print_info "Start services with: docker compose up"
-    exit 1
-fi
-
 # Check if Keycloak is accessible
-print_info "Checking Keycloak availability at $KEYCLOAK_URL..."
-if ! curl -sf "$KEYCLOAK_URL/realms/$REALM" > /dev/null; then
+if ! curl -sf "$KEYCLOAK_URL/realms/$REALM" > /dev/null 2>&1; then
     print_error "Keycloak is not accessible at $KEYCLOAK_URL"
     print_info "Make sure docker-compose is running: docker compose up"
     exit 1
 fi
-print_success "Keycloak is accessible"
 
-# Try to authenticate first (user might already exist with correct password)
-print_info "Checking if user exists and can authenticate..."
+# Try to authenticate first
+print_info "Attempting to authenticate as '$USERNAME'..."
 AUTH_RESPONSE=$(curl -s -X POST \
     "$KEYCLOAK_URL/realms/$REALM/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
@@ -161,13 +153,32 @@ if echo "$AUTH_RESPONSE" | jq -e '.access_token' > /dev/null 2>&1; then
     print_success "Authentication successful"
     TOKEN_RESPONSE="$AUTH_RESPONSE"
 else
-    # Authentication failed - create or update user
+    # Authentication failed
     AUTH_ERROR=$(echo "$AUTH_RESPONSE" | jq -r '.error_description // .error // "Unknown error"')
     print_info "Authentication failed: $AUTH_ERROR"
-    print_info "Creating or updating user via Keycloak Admin CLI..."
-
+    
+    if [ "$CREATE_USER" = false ]; then
+        print_error "User does not exist or password is incorrect"
+        print_info "Use --create flag to create the user automatically"
+        exit 1
+    fi
+    
+    # Check if docker is available for user creation
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker is required for user creation but not installed"
+        exit 1
+    fi
+    
+    # Check if Keycloak container is running
+    if ! docker ps --format '{{.Names}}' | grep -q "^${KEYCLOAK_CONTAINER}$"; then
+        print_error "Keycloak container '${KEYCLOAK_CONTAINER}' is not running"
+        print_info "Start services with: docker compose up"
+        exit 1
+    fi
+    
+    print_info "Creating/updating user..."
+    
     # Login to kcadm
-    print_info "Authenticating as admin..."
     if ! docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh config credentials \
         --server http://localhost:8080 \
         --realm master \
@@ -176,17 +187,15 @@ else
         print_error "Failed to authenticate as Keycloak admin"
         exit 1
     fi
-    print_success "Admin authentication successful"
-
+    
     # Check if user exists
-    print_info "Checking if user '$USERNAME' exists..."
-    USER_EXISTS=$(docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh get users \
+    USER_ID=$(docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh get users \
         -r "$REALM" \
         -q "username=$USERNAME" \
-        -q "exact=true" 2>/dev/null | jq -r '.[0].username // empty')
-
-    if [ -z "$USER_EXISTS" ]; then
-        # Create new user with all fields to avoid "not fully set up" error
+        -q "exact=true" 2>/dev/null | jq -r '.[0].id // empty')
+    
+    if [ -z "$USER_ID" ]; then
+        # Create new user
         print_info "Creating new user '$USERNAME'..."
         if ! docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh create users \
             -r "$REALM" \
@@ -195,17 +204,23 @@ else
             -s emailVerified=true \
             -s firstName="$USERNAME" \
             -s lastName="User" \
-            -s email="$USERNAME@local.dev" > /dev/null 2>&1; then
+            -s email="$USERNAME@local.dev" \
+            -s 'requiredActions=[]' > /dev/null 2>&1; then
             print_error "Failed to create user"
             exit 1
         fi
         print_success "User created successfully"
+        
+        # Get the newly created user ID
+        USER_ID=$(docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh get users \
+            -r "$REALM" \
+            -q "username=$USERNAME" \
+            -q "exact=true" 2>/dev/null | jq -r '.[0].id')
     else
-        print_info "User already exists"
+        print_info "User already exists, updating password..."
     fi
-
-    # Set/reset password
-    print_info "Setting password..."
+    
+    # Set password
     if ! docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh set-password \
         -r "$REALM" \
         --username "$USERNAME" \
@@ -213,48 +228,13 @@ else
         print_error "Failed to set password"
         exit 1
     fi
-    print_success "Password set successfully"
-
-    # Get user ID
-    USER_ID=$(docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh get users \
-        -r "$REALM" \
-        -q "username=$USERNAME" 2>/dev/null | jq -r '.[0].id')
-
-    if [ -z "$USER_ID" ] || [ "$USER_ID" = "null" ]; then
-        print_error "Failed to get user ID"
-        exit 1
-    fi
-
-    # Clear any required actions and set email verified
-    print_info "Clearing required actions and configuring user..."
-    if ! docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh update users/"$USER_ID" \
-        -r "$REALM" \
-        -s 'requiredActions=[]' \
-        -s 'emailVerified=true' \
-        -s 'enabled=true' > /dev/null 2>&1; then
-        print_error "Failed to configure user"
-        exit 1
-    fi
-    print_success "User configured successfully"
-
-    # Wait longer for changes to propagate
-    sleep 3
-
-    # Verify user configuration
-    print_info "Verifying user configuration..."
-    USER_INFO=$(docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh get users/"$USER_ID" \
-        -r "$REALM" 2>/dev/null)
-    REQUIRED_ACTIONS_COUNT=$(echo "$USER_INFO" | jq -r '.requiredActions | length')
-
-    if [ "$REQUIRED_ACTIONS_COUNT" != "0" ]; then
-        print_error "User still has required actions"
-        echo "$USER_INFO" | jq '.requiredActions' >&2
-        exit 1
-    fi
-    print_success "User has no required actions"
-
-    # Now authenticate
-    print_info "Authenticating as '$USERNAME'..."
+    print_success "Password updated successfully"
+    
+    # Wait for changes to propagate
+    sleep 2
+    
+    # Now authenticate with the new/updated credentials
+    print_info "Authenticating with new credentials..."
     TOKEN_RESPONSE=$(curl -s -X POST \
         "$KEYCLOAK_URL/realms/$REALM/protocol/openid-connect/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
@@ -262,31 +242,11 @@ else
         -d "password=$PASSWORD" \
         -d "grant_type=password" \
         -d "client_id=$CLIENT_ID")
-
-    # Check if authentication succeeded after user setup
+    
     if ! echo "$TOKEN_RESPONSE" | jq -e '.access_token' > /dev/null 2>&1; then
-        # Direct grant still failing, try impersonation as workaround
-        AUTH_ERROR=$(echo "$TOKEN_RESPONSE" | jq -r '.error_description // .error // "Unknown error"')
-        print_info "Direct grant failed ($AUTH_ERROR), using admin impersonation..."
-
-        # Get the client's internal ID
-        CLIENT_UUID=$(docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh get clients \
-            -r "$REALM" \
-            -q "clientId=$CLIENT_ID" 2>/dev/null | grep '"id"' | head -1 | sed 's/.*"id" : "\(.*\)".*/\1/')
-
-        # Impersonate the user to get a token
-        IMPERSONATE_RESPONSE=$(curl -s -X POST \
-            "$KEYCLOAK_URL/admin/realms/$REALM/users/$USER_ID/impersonation" \
-            -H "Authorization: Bearer $(docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin > /dev/null 2>&1 && docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh get-token 2>/dev/null | sed 's/.*"access_token":"\([^"]*\)".*/\1/')")
-
-        if echo "$IMPERSONATE_RESPONSE" | jq -e '.sameRealm' > /dev/null 2>&1; then
-            # Impersonation returns a redirect, we need to extract session and exchange for token
-            print_error "Impersonation not supported in this Keycloak configuration"
-            print_error "Please use a different Keycloak realm configuration or use web-based authentication"
-            exit 1
-        fi
-
         print_error "Failed to authenticate after user setup"
+        AUTH_ERROR=$(echo "$TOKEN_RESPONSE" | jq -r '.error_description // .error // "Unknown error"')
+        print_error "Error: $AUTH_ERROR"
         exit 1
     fi
     print_success "Authentication successful"
